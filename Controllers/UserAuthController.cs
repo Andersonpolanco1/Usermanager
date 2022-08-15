@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using Usermanager.Models;
 using System.Text;
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Usermanager.Controllers
 {
@@ -13,12 +14,14 @@ namespace Usermanager.Controllers
     [ApiController]
     public class UserAuthController : ControllerBase
     {
+        private IConfiguration _configuration;
+        private IUserService _userService;
         private static User user = new User();
-        private readonly IConfiguration configuration;
 
-        UserAuthController(IConfiguration configuration)
+        public UserAuthController(IConfiguration configuration, IUserService userService)
         {
-            this.configuration = configuration;
+            _configuration = configuration;
+            _userService = userService;
         }
 
         [HttpPost, Route("Register")]
@@ -27,6 +30,7 @@ namespace Usermanager.Controllers
         {
             CreatePasswordHash(userDto.Password, out byte[] passwordHash, out byte[] passwordSalt);
 
+            user.Id = Guid.NewGuid();
             user.UserName = userDto.UserName;
             user.PasswordHash = passwordHash;
             user.PasswordSalt = passwordSalt;
@@ -43,13 +47,19 @@ namespace Usermanager.Controllers
             if (!IsPasswordCorrect(userDto.Password, user.PasswordSalt, user.PasswordHash)) 
                 return BadRequest(new { message="Password is incorrect." });
             
-            return Ok(GetToken());
+            return Ok(new { token = GetToken() });
+        }
+
+        [HttpGet, Route("get-me"), Authorize]
+        public ActionResult<Guid> GetMyId()
+        {
+            return _userService.GetUserId();
         }
 
         private string GetToken()
         {
             var key = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(configuration.GetSection("AppSettings:SecurityToken").Value)
+                Encoding.UTF8.GetBytes(_configuration.GetSection("AppSettings:Token").Value)
                 );
 
             var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
@@ -65,7 +75,9 @@ namespace Usermanager.Controllers
         {
             return new List<Claim>()
             {
-                new Claim(ClaimTypes.Name, user.UserName)
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName),
+                new Claim(ClaimTypes.Role, "Admin")
             };
         }
 
